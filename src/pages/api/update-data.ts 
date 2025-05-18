@@ -1,0 +1,30 @@
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { updateUserData } from '@/lib/sheets';
+import { OpenAI } from 'openai';
+import axios from 'axios';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const { session_id, email } = req.body;
+
+  const response = await axios.get(
+    `https://api.moveo.ai/v1/analytics/log_sessions_content?session_id=${session_id}`,
+    { headers: { Authorization: `Bearer ${process.env.MOVEO_API_KEY}` } }
+  );
+
+  const fullChat = response.data.session;
+
+  const ai = await openai.chat.completions.create({
+    model: 'gpt-4',
+    messages: [
+      { role: 'system', content: 'Você é um assistente que analisa conversas e sugere mudanças em dados.' },
+      { role: 'user', content: `Conversa:\n${fullChat}\n\nQuais campos devem ser alterados no cadastro? Responda em JSON.` }
+    ]
+  });
+
+  const updates = JSON.parse(ai.choices[0].message.content || '{}');
+  await updateUserData(email, updates);
+
+  return res.json({ status: 'ok', updates });
+}
